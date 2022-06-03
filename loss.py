@@ -21,7 +21,7 @@ class Loss(nn.Module):
         # computes distances
         num_qry = true.eq(cls_[0].item()).sum().item() - num_spt
         idx_qry = torch.stack(
-            list(map(lambda c: true.eq(c).nonzero()[num_spt:], cls_))
+            list(map(lambda c: (true == c).nonzero()[num_spt:], cls_))
         ).view(-1)
         samples_qry = data[idx_qry]
         dists = calc_distance(samples_qry, protos, "l2")

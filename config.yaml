@@ -1,0 +1,19 @@
+test: False
+
+num_epoch: 100
+
+num_epi_train: 100
+num_cls_train: 60
+num_spt_train: 5
+num_qry_train: 5
+
+num_epi_valid: 100
+num_cls_valid: 5
+num_spt_valid: 5
+num_qry_valid: 15
+
+num_epi_test: 20
+
+lr: 0.001
+lr_sched_step: 20
+lr_sched_gamma: 0.5

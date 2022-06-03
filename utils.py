@@ -2,6 +2,22 @@ import os
 import torch
 
 
+class RunningAvg:
+    """Class computing running average"""
+
+    def __init__(self):
+        self.count = 0
+        self.sum = 0
+        self.avg = 0
+        self.val = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+
 def calc_distance(x, y, metric):
     """Calculates pairwise distance"""
     num_x = x.shape[0]
@@ -33,22 +49,6 @@ def calc_distance(x, y, metric):
 
         dot_sim = (x_expanded * y_expanded).sum(dim=2)
         return -dot_sim
-
-
-class RunningAvg:
-    """Class computing running average"""
-
-    def __init__(self):
-        self.count = 0
-        self.sum = 0
-        self.avg = 0
-        self.val = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
 
 
 def save_checkpoint(state, is_best, log_dir):

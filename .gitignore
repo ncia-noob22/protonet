@@ -1,0 +1,18 @@
+# Temporary File
+tmp*
+
+# Large File
+data/*/
+!data/split/
+
+# OS File
+*.deb
+.DS_Store
+*.exe
+desktop.ini
+*:Zone.Identifier
+
+# Python-specific
+.env/
+__pycache__/
+*.py.swp
