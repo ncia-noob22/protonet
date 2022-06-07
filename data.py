@@ -1,11 +1,12 @@
 import os, glob
 import shutil
-import torch
-from torch.utils.data import Dataset, DataLoader, Sampler
-from torchvision.datasets import Omniglot
 import cv2
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+import numpy as np
+import torch
+from torch.utils.data import Dataset, DataLoader, Sampler
+from torchvision.datasets import Omniglot
 import tqdm
 
 DIR_DATA = os.path.join(os.path.dirname(os.path.realpath(__file__)), "data")
@@ -45,7 +46,6 @@ class CustomDataset(Dataset):
         self.proc_dir = DIR_DATA
 
         if not os.path.exists(self.raw_dir):
-            print("Data not found. Downloading data")
             self.download()
 
         self.x, self.y = self.make_dataset(type)
@@ -75,7 +75,7 @@ class CustomDataset(Dataset):
 
         x, y = [], []
         for idx, cls_ in enumerate(tqdm(classes, desc="Making dataset")):
-            dir_cls, degree = cls_.rsplit("/", 1)
+            cls_dir, degree = cls_.rsplit("/", 1)
             degree = int(degree[3:])
 
             transform = A.Compose(
@@ -87,7 +87,7 @@ class CustomDataset(Dataset):
                 ]
             )
 
-            for img_path in glob(os.path.join(self.raw_dir, dir_cls, "*")):
+            for img_path in glob(os.path.join(self.raw_dir, cls_dir, "*")):
                 img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
                 img = transform(image=img)["image"]
 
@@ -98,11 +98,65 @@ class CustomDataset(Dataset):
 
 
 class CustomSampler(Sampler):
-    def __init__(self):
-        super().__init__()
+    def __init__(
+        self,
+        num_cls,
+        num_spt,
+        num_qry,
+        num_epi,
+        labels,
+        data_source=None,
+    ):
+        """
+        Args:
+            labels
+            num_cls: Number of classes for each episode
+            num_cpt, num_qry: Number of samples for each class for each episode
+            num_epi: Number of episodes for each epoch
+        """
+        super().__init__(data_source)
+        self.labels = labels
+        self.num_cls = num_cls
+        self.num_spt = num_spt
+        self.num_qry = num_qry
+        self.num_epi = num_epi
+
+        self.classes, self.counts = torch.unique(self.labels, return_counts=True)
+        self.classes = torch.LongTensor(self.classes)
+
+        self.idxs = range(len(self.labels))
+        self.indexes = torch.Tensor(
+            np.empty((len(self.classes), max(self.counts)), dtype=int) * np.nan
+        )
+        self.numel_per_class = torch.zeros_like(self.classes)
+        for idx, label in enumerate(self.labels):
+            label_idx = np.argwhere(self.classes == label).item()
+            self.indexes[
+                label_idx, np.where(np.isnan(self.indexes[label_idx]))[0][0]
+            ] = idx
+            self.numel_per_class[label_idx] += 1
 
     def __iter__(self):
-        return
+        for _ in range(self.num_epi):
+            batch_spt = torch.LongTensor(self.num_spt * self.num_cls)
+            batch_qry = torch.LongTensor(self.num_qry * self.num_cls)
+            cls_idx = torch.randperm(len(self.classes))[: self.num_cls]
+            for i, cls_ in enumerate(self.classes[cls_idx]):
+                s_s = slice(i * self.num_spt, (i + 1) * self.num_spt)
+                s_q = slice(i * self.num_qry, (i + 1) * self.num_qry)
+
+                label_idx = (
+                    torch.arange(len(self.classes)).long()[self.classes == cls_].item()
+                )
+                sample_idxs = torch.randperm(self.numel_per_class[label_idx])[
+                    : self.num_spt + self.num_qry
+                ]
+
+                batch_spt[s_s] = self.indexes[label_idx][sample_idxs][: self.num_spt]
+                batch_qry[s_q] = self.indexes[label_idx][sample_idxs][self.num_spt :]
+
+            batch = torch.cat((batch_spt, batch_qry))
+            yield batch
 
     def __len__(self):
-        return len(self)
+        return self.num_epi
