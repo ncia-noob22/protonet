@@ -1,4 +1,5 @@
-import os, glob
+import os
+from glob import glob
 import shutil
 import cv2
 import albumentations as A
@@ -7,74 +8,86 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader, Sampler
 from torchvision.datasets import Omniglot
-import tqdm
+from tqdm import tqdm
 
-DIR_DATA = os.path.join(os.path.dirname(os.path.realpath(__file__)), "data")
+DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "data")
 
 
-def get_dataloaders(config, *types):
+def get_dataloaders(config):
     use_pin_mem = config["device"].startswith("cuda")
 
-    res = []
-    for type in types:
-        mdb_path = os.path.join(DIR_DATA, "mdb", f"{type}.mdb")
-        if os.path.exists(mdb_path):
-            data = torch.load(mdb_path)
-        else:
-            data = CustomDataset(type)
-            if not os.path.exists(os.path.dirname(mdb_path)):
-                os.makedirs(os.path.dirname(mdb_path))
-            torch.save(data, mdb_path)
+    if not config["test"]:
+        loaders = []
+        for type in ["trainval", "test"]:
+            mdb_path = os.path.join(DATA_DIR, "mdb", f"{type}.mdb")
+            if os.path.exists(mdb_path):
+                data = torch.load(mdb_path)
+            else:
+                data = CustomDataset(type)
+                if not os.path.exists(os.path.dirname(mdb_path)):
+                    os.makedirs(os.path.dirname(mdb_path))
+                torch.save(data, mdb_path)
 
-        num_cls = config[f"num_cls_{type}"]
-        num_spt = config[f"num_spt_{type}"]
-        num_qry = config[f"num_qry_{type}"]
-        num_epi = config[f"num_epi_{type}"]
+            type = "train" if type.startswith("train") else "valid"
+            num_cls = config[f"num_cls_{type}"]
+            num_spt = config[f"num_spt_{type}"]
+            num_qry = config[f"num_qry_{type}"]
+            num_epi = config[f"num_epi_{type}"]
 
-        sampler = CustomSampler(data.y, num_cls, num_spt, num_qry, num_epi)
-        data_loader = DataLoader(data, batch_sampler=sampler, pin_memory=use_pin_mem)
-        res.append(data_loader)
-    return res
+            sampler = CustomSampler(data.y, num_cls, num_spt, num_qry, num_epi)
+            data_loader = DataLoader(
+                data, batch_sampler=sampler, pin_memory=use_pin_mem
+            )
+            loaders.append(data_loader)
+        return loaders
+    else:
+        data = CustomDataset("test")  #! need to adjust
+        test_loader = DataLoader(data, pin_memory=use_pin_mem)
+        return test_loader
 
 
 class CustomDataset(Dataset):
     def __init__(self, type):
         super().__init__()
-        self.raw_dir = os.path.join(DIR_DATA, "raw")
-        self.split_dir = os.path.join(DIR_DATA, "split")
-        self.orig_dir = os.path.join(DIR_DATA, "omniglot-py")
-        self.proc_dir = DIR_DATA
+        self.split_dir = os.path.join(DATA_DIR, "split")
+        self.orig_dir = os.path.join(DATA_DIR, "omniglot-py")
+        self.proc_dir = os.path.join(DATA_DIR, "raw")
 
-        if not os.path.exists(self.raw_dir):
+        if not os.path.exists(self.proc_dir):
             self.download()
-
+        
         self.x, self.y = self.make_dataset(type)
 
-    def __getitem__(self, index):
-        return self.x[index], self.y[index]
+    def __getitem__(self, idx):
+        return self.x[idx], self.y[idx]
 
     def __len__(self):
         return len(self.x)
 
     def download(self):
-        Omniglot(root=DIR_DATA, background=False, download=True)
-        Omniglot(root=DIR_DATA, background=True, download=True)
+        Omniglot(root=DATA_DIR, background=False, download=True)
+        Omniglot(root=DATA_DIR, background=True, download=True)
 
         if not os.path.exists(self.proc_dir):
             os.mkdir(self.proc_dir)
 
-        for p in ["images_background", "images_evaluation"]:
-            for f in os.listdir(os.path.join(self.orig_dir, p)):
-                shutil.move(os.path.join(self.orig_dir, p, f), self.proc_dir)
+        for dirname in ["images_background", "images_evaluation"]:
+            for filename in os.listdir(os.path.join(self.orig_dir, dirname)):
+                try:
+                    shutil.move(
+                        os.path.join(self.orig_dir, dirname, filename), self.proc_dir
+                    )
+                except:
+                    pass
 
         shutil.rmtree(self.orig_dir)
 
     def make_dataset(self, type):
         with open(os.path.join(self.split_dir, f"{type}.txt"), "r") as f:
-            classes = f.read().splitlines()
+            clss = f.read().splitlines()
 
         x, y = [], []
-        for idx, cls_ in enumerate(tqdm(classes, desc="Making dataset")):
+        for idx, cls_ in enumerate(tqdm(clss, desc="Making dataset")):
             cls_dir, degree = cls_.rsplit("/", 1)
             degree = int(degree[3:])
 
@@ -87,7 +100,7 @@ class CustomDataset(Dataset):
                 ]
             )
 
-            for img_path in glob(os.path.join(self.raw_dir, cls_dir, "*")):
+            for img_path in glob(os.path.join(self.proc_dir, cls_dir, "*")):
                 img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
                 img = transform(image=img)["image"]
 
@@ -100,11 +113,11 @@ class CustomDataset(Dataset):
 class CustomSampler(Sampler):
     def __init__(
         self,
+        labels,
         num_cls,
         num_spt,
         num_qry,
         num_epi,
-        labels,
         data_source=None,
     ):
         """
